@@ -287,7 +287,14 @@ export function KasirPage() {
                 return (
                   <article
                     key={p.id}
-                    className={`card group overflow-hidden ${isOut ? "opacity-80" : ""}`}
+                    onClick={() => {
+                      if (!isOut) handleAddProduct(p);
+                    }}
+                    className={`card group overflow-hidden transition-all ${
+                      isOut
+                        ? "cursor-not-allowed opacity-80"
+                        : "cursor-pointer hover:border-[#FCA5A5] active:scale-[0.99]"
+                    }`}
                   >
                     <div className="relative">
                       <ProductPhoto
@@ -315,7 +322,10 @@ export function KasirPage() {
                       <button
                         type="button"
                         disabled={isOut}
-                        onClick={() => handleAddProduct(p)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleAddProduct(p);
+                        }}
                         aria-label={`Tambah ${p.name}`}
                         className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg text-white transition-colors ${
                           isOut
