@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import jsQR from "jsqr";
+import { BrowserMultiFormatReader, type IScannerControls } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { Button } from "@/components/Button";
 import { Icon } from "@/components/Icon";
 import { Input } from "@/components/Input";
@@ -13,30 +14,22 @@ interface ScanCodeModalProps {
   description?: string;
 }
 
-interface BarcodeDetectorLike {
-  detect: (source: ImageBitmapSource) => Promise<Array<{ rawValue?: string }>>;
-}
-
-declare global {
-  interface Window {
-    BarcodeDetector?: new (options?: { formats?: string[] }) => BarcodeDetectorLike;
-  }
-}
-
 export function ScanCodeModal({
   open,
   onClose,
   onDetected,
   title = "Pindai Barcode / QR Code",
-  description = "Arahkan kamera ke QR code atau barcode produk, atau ketik kode secara manual.",
+  description = "Arahkan kamera ke barcode (EAN-13/produk) atau QR code, atau ketik kode secara manual.",
 }: ScanCodeModalProps) {
   const [manualCode, setManualCode] = useState("");
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraActive, setCameraActive] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const onDetectedRef = useRef(onDetected);
+  onDetectedRef.current = onDetected;
 
   useEffect(() => {
     if (!open) {
@@ -47,10 +40,11 @@ export function ScanCodeModal({
     }
 
     let cancelled = false;
-    let rafId = 0;
+    let handled = false;
 
-    const stopStream = () => {
-      if (rafId) cancelAnimationFrame(rafId);
+    const cleanup = () => {
+      controlsRef.current?.stop();
+      controlsRef.current = null;
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
@@ -58,10 +52,10 @@ export function ScanCodeModal({
       setCameraActive(false);
     };
 
-    const startCamera = async () => {
+    const startScanner = async () => {
       if (!window.isSecureContext) {
         setCameraError(
-          "Kamera di iPhone/HP hanya bisa aktif lewat HTTPS (bukan HTTP IP lokal). Gunakan input kode di bawah.",
+          "Kamera hanya bisa aktif lewat HTTPS (atau localhost). Gunakan input kode di bawah.",
         );
         return;
       }
@@ -73,73 +67,53 @@ export function ScanCodeModal({
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: "environment" } },
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
           audio: false,
         });
-        if (cancelled) {
+
+        if (cancelled || !videoRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
+
         streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play();
-        }
         setCameraActive(true);
 
-        if (window.BarcodeDetector) {
-          const detector = new window.BarcodeDetector({
-            formats: ["qr_code", "ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e"],
-          });
+        const hints = new Map();
+        hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+          BarcodeFormat.EAN_13,
+          BarcodeFormat.EAN_8,
+          BarcodeFormat.UPC_A,
+          BarcodeFormat.UPC_E,
+          BarcodeFormat.CODE_128,
+          BarcodeFormat.CODE_39,
+          BarcodeFormat.ITF,
+          BarcodeFormat.QR_CODE,
+        ]);
+        hints.set(DecodeHintType.TRY_HARDER, true);
 
-          const scanNative = async () => {
-            if (cancelled || !videoRef.current) return;
-            try {
-              if (videoRef.current.readyState >= 2) {
-                const results = await detector.detect(videoRef.current);
-                const raw = results.find((r) => r.rawValue)?.rawValue;
-                if (raw) {
-                  stopStream();
-                  onDetected(raw.trim());
-                  return;
-                }
-              }
-            } catch {
-              // Ignore single-frame detection errors
-            }
-            rafId = requestAnimationFrame(() => void scanNative());
-          };
+        const reader = new BrowserMultiFormatReader(hints, {
+          delayBetweenScanAttempts: 120,
+        });
 
-          rafId = requestAnimationFrame(() => void scanNative());
-        } else {
-          // Fallback for iPhone / iOS Safari (supports QR code via jsQR)
-          if (!canvasRef.current) {
-            canvasRef.current = document.createElement("canvas");
+        const controls = await reader.decodeFromStream(stream, videoRef.current, (result) => {
+          if (cancelled || handled) return;
+          const text = result?.getText()?.trim();
+          if (text) {
+            handled = true;
+            cleanup();
+            onDetectedRef.current(text);
           }
-          const canvas = canvasRef.current;
-          const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        });
 
-          const scanJsQr = () => {
-            if (cancelled || !videoRef.current || !ctx) return;
-            const video = videoRef.current;
-            if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-              const decoded = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-              });
-              if (decoded?.data) {
-                stopStream();
-                onDetected(decoded.data.trim());
-                return;
-              }
-            }
-            rafId = requestAnimationFrame(scanJsQr);
-          };
-
-          rafId = requestAnimationFrame(scanJsQr);
+        if (cancelled) {
+          controls.stop();
+        } else {
+          controlsRef.current = controls;
         }
       } catch {
         if (!cancelled) {
@@ -150,13 +124,13 @@ export function ScanCodeModal({
       }
     };
 
-    void startCamera();
+    void startScanner();
 
     return () => {
       cancelled = true;
-      stopStream();
+      cleanup();
     };
-  }, [open, onDetected]);
+  }, [open]);
 
   const handleManualSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -173,7 +147,7 @@ export function ScanCodeModal({
         <div className={cameraActive ? "relative aspect-[4/3] w-full" : "hidden"}>
           <video ref={videoRef} autoPlay muted playsInline className="h-full w-full object-cover" />
           <div className="pointer-events-none absolute inset-0 grid place-items-center">
-            <div className="h-40 w-40 rounded-2xl border-2 border-[#DC2626] shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
+            <div className="h-32 w-56 rounded-2xl border-2 border-[#DC2626] shadow-[0_0_0_9999px_rgba(0,0,0,0.35)]" />
           </div>
         </div>
         {!cameraActive && (
