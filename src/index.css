@@ -1,0 +1,86 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@import "tailwindcss";
+
+@layer base {
+  html,
+  body,
+  #root {
+    min-width: 768px;
+    min-height: 100%;
+  }
+
+  body {
+    font-family: "Inter", sans-serif;
+    background: #f9fafb;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  .card {
+    border: 1px solid #e5e7eb;
+    border-radius: 16px;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .product-photo {
+    background-repeat: no-repeat;
+    background-size: 400% 300%;
+    background-color: #f7f2e9;
+  }
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #d1d5db transparent;
+}
+
+.print-only-receipt {
+  display: none;
+}
+
+@media print {
+  body:not(.printing-report) > *:not(.print-only-receipt) {
+    display: none !important;
+  }
+
+  body.printing-report aside,
+  body.printing-report .no-print,
+  body.printing-report .print-only-receipt {
+    display: none !important;
+  }
+
+  body.printing-report main {
+    margin-left: 0 !important;
+    min-width: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+
+  html,
+  body {
+    min-width: 0 !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  body:not(.printing-report) .print-only-receipt {
+    display: block !important;
+    width: 80mm;
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 8mm 4mm;
+    font-family: "Courier New", Courier, monospace;
+    color: #000000;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+}
